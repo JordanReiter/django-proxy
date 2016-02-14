@@ -1,0 +1,37 @@
+{% if redirection %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Redirect</title>
+  </head>
+  <body>
+    <code>
+        Redirect to <a href="{{ redirection }}">{{ redirection }}</a>
+    </code>
+  </body>
+</html>
+{% else %}
+{{ response|safe }}
+{% endif %}
+<hr />
+<h1>{{ url }} [{{ status }}]</h1>
+<h2>Headers</h2>
+<dl>
+    {% for key, value in headers.items %}
+        <dt>{{ key }}</dt>
+        <dd>{{ value }}</dd>
+    {% endfor %}
+</dl>
+<h2>Requests args</h2>
+<dl>
+    {% for key, value in requests_args.items %}
+        <dt>{{ key }}</dt>
+        <dd>{{ value }}</dd>
+    {% endfor %}
+</dl>
+{% if messages %}
+	{% for message in messages %}
+		<p>{{ message }}</p>
+	{% endfor %}
+{% endif %}
