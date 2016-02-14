@@ -1,9 +1,15 @@
 import requests
 from django.http import HttpResponse
 from django.http import QueryDict
+from django.conf import settings
+from django.core.urlresolvers import reverse
+from django.shortcuts import redirect, render
+from django.views.decorators.csrf import csrf_exempt
 
+from .utils import proxy_reverse, rewrite_response
 
-def proxy_view(request, url, requests_args=None):
+@csrf_exempt
+def proxy_view(request, url, domain=None, secure=False, requests_args=None, template_name="proxy/debug.html"):
     """
     Forward as close to an exact copy of the request as possible along to the
     given url.  Respond with as close to an exact copy of the resulting
@@ -16,12 +22,24 @@ def proxy_view(request, url, requests_args=None):
     headers = get_headers(request.META)
     params = request.GET.copy()
 
+    proxy_domain = settings.PROXY_DOMAIN
+
+    protocol = 'http'
+    if secure:
+        protocol = 'https'
+
+    url = '%s://%s/%s' % (protocol, proxy_domain, url[1:] if url.startswith('/') else url)
+
+
     if 'headers' not in requests_args:
         requests_args['headers'] = {}
     if 'data' not in requests_args:
         requests_args['data'] = request.body
     if 'params' not in requests_args:
         requests_args['params'] = QueryDict('', mutable=True)
+    if 'cookies' not in requests_args and getattr(settings, 'PROXY_SET_COOKIES', False):
+        headers = dict([ (kk, vv) for kk, vv in headers.items() if kk.lower() != 'cookie' ])
+        requests_args['cookies'] = get_cookies(request, proxy_domain)
 
     # Overwrite any headers and params from the incoming request with explicitly
     # specified values for the requests library.
@@ -37,11 +55,41 @@ def proxy_view(request, url, requests_args=None):
     requests_args['headers'] = headers
     requests_args['params'] = params
 
+    if settings.DEBUG and request.method != 'HEAD':
+        requests_args['allow_redirects'] = False
+
+
     response = requests.request(request.method, url, **requests_args)
 
-    proxy_response = HttpResponse(
-        response.content,
-        status=response.status_code)
+    if getattr(settings, 'PROXY_SET_COOKIES', False):
+        set_cookies(request, proxy_domain, response.cookies)
+
+    content_type = response.headers['content-type']
+    content = response.content
+    show_debug = False
+    if 'html' in content_type.lower():
+        content = rewrite_response(content, proxy_domain, secure=secure)
+        show_debug = settings.DEBUG
+    elif 'javascript' in content_type.lower():
+        content = rewrite_script(content, proxy_domain, secure=secure)
+
+    if show_debug:
+        ctx = {
+            'url': url,
+            'requests_args': requests_args,
+            'response': content,
+            'headers': response.headers,
+            'status': response.status_code,
+        }
+        if int(response.status_code) in (301, 302):
+            redirection = response.headers['location']
+            ctx['redirection'] = proxy_reverse(redirection, secure)
+        proxy_response = render(request, template_name, ctx)
+    else:
+        proxy_response = HttpResponse(
+            content,
+            status=response.status_code)
+
 
     excluded_headers = set([
         # Hop-by-hop headers
@@ -68,8 +116,34 @@ def proxy_view(request, url, requests_args=None):
             continue
         proxy_response[key] = value
 
+
     return proxy_response
 
+
+PROXY_COOKIE_SESSION_KEY = '__proxy_cookiefile_%s'
+
+def get_session_key(domain):
+    return PROXY_COOKIE_SESSION_KEY % domain.replace('.', '_')
+
+def get_cookies(request, domain):
+    return request.session.get(get_session_key(domain))
+
+def set_cookies(request, domain, cookies):
+    import cookielib
+    try:
+        jar = request.session[get_session_key(domain)]
+    except KeyError:
+        jar = requests.cookies.RequestsCookieJar()
+    try:
+        for cookie in cookies:
+            jar.set_cookie(cookie)
+    except AttributeError:
+        for key, value in cookies.items():
+            cookie = SimpleCookie()
+            cookie[key] = value
+            jar.set_cookie(cookie)
+    request.session[get_session_key(domain)] = jar
+    request.session.modified = True
 
 def get_headers(environ):
     """
