@@ -1,18 +1,22 @@
 import re
-import urllib2
-import urlparse
+import six
+
+try:
+    from urlparse import urlparse, urljoin
+except ImportError:
+    from urllib.parse import urlparse, urljoin
 
 from bs4 import BeautifulSoup
 
 def proxy_reverse(url, secure=False):
     from django.core.urlresolvers import reverse
-    print "Rendering reverse proxy url for ", url
+    print("Rendering reverse proxy url for ", url)
     secure = (
         (secure or url.startswith('https://')) and 
         not url.startswith('http://')
     )
-    parsed_url = urlparse.urlparse(url)
-    #print parsed_url
+    parsed_url = urlparse(url)
+    #print(parsed_url)
     new_uri = "%s%s%s" % ( 
         parsed_url.path, 
         "?" + parsed_url.query if parsed_url.query else "", 
@@ -21,35 +25,35 @@ def proxy_reverse(url, secure=False):
     if new_uri and new_uri[0] == '/':
         new_uri = new_uri[1:]
     process_view_name = 'proxy'
-    #print "New uri is ", new_uri
+    #print("New uri is ", new_uri)
     if secure:
         process_view_name = 'proxy_secure'
     reversed_url = reverse(process_view_name, args=[new_uri])
-    print "Reversed URL is", reversed_url
+    print("Reversed URL is", reversed_url)
     return reversed_url
 
 
 def rewrite_url(tag, domain, attr='href', secure=False):
-    #print "Looking at", tag, domain
+    #print("Looking at", tag, domain)
     old_url = tag.get(attr)
     if not old_url:
         return
     if not re.search(r'^(?:https?:/)?/', old_url): # local, query, or hash
-        print "Skipping", old_url
+        print("Skipping", old_url)
         return
     secure = (
         (secure or old_url.startswith('https://')) and 
         not old_url.startswith('http://')
     )
-    #print old_url, " is secure? ", secure
+    #print(old_url, " is secure? ", secure)
     if not secure and not re.search(r'^(?:https?)?://', old_url):
         return
-    #print old_url, re.search(r'^(?:https?)?://', old_url)
+    #print(old_url, re.search(r'^(?:https?)?://', old_url)
     protocol = 'http'
     if secure:
         protocol = 'https'
-    new_url = urlparse.urljoin('%s://%s' % (protocol, domain), old_url)
-    #print "New url is ", new_url
+    new_url = urljoin('%s://%s' % (protocol, domain), old_url)
+    #print("New url is ", new_url)
     if domain in new_url:
         tag[attr] = proxy_reverse(new_url, secure)
 
@@ -86,7 +90,9 @@ def rewrite_response(resp, domain=None, secure=False):
         rewrite_url(img_tag, domain, attr='src', secure=secure)
 
     for form_tag in soup.findAll('form'):
+        print("Looking at form", form_tag.get('action'))
         rewrite_url(form_tag, domain, attr='action', secure=secure)
+        print("Rewrote it to", form_tag.get('action'))
 
-    return unicode(soup)
+    return six.text_type(soup)
 

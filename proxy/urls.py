@@ -1,6 +1,8 @@
-from django.conf.urls import patterns, include, url
+from django.conf.urls import url
 
-urlpatterns = patterns('proxy.views',
-    url(r'^_s/(?P<url>.*)$', 'proxy_view', {'secure': True }, name='proxy_secure'),
-    url(r'^(?P<url>.*)$', 'proxy_view', name='proxy'),
-)
+from .views import proxy_view
+
+urlpatterns = [
+    url(r'^_s/(?P<url>.*)$', proxy_view, {'secure': True }, name='proxy_secure'),
+    url(r'^(?P<url>.*)$', proxy_view, name='proxy'),
+]

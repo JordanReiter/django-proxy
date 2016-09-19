@@ -1,3 +1,8 @@
+try:
+    from urlparse import urljoin
+except ImportError:
+    from urllib.parse import urljoin
+
 import requests
 from django.http import HttpResponse
 from django.http import QueryDict
@@ -7,6 +12,8 @@ from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
 
 from .utils import proxy_reverse, rewrite_response
+
+IGNORE_SSL = getattr(settings, 'PROXY_IGNORE_SSL', False)
 
 @csrf_exempt
 def proxy_view(request, url, domain=None, secure=False, requests_args=None, template_name="proxy/debug.html"):
@@ -68,10 +75,10 @@ def proxy_view(request, url, domain=None, secure=False, requests_args=None, temp
     content = response.content
     show_debug = False
     if 'html' in content_type.lower():
-        content = rewrite_response(content, proxy_domain, secure=secure)
+        content = rewrite_response(content, proxy_domain, secure=secure or IGNORE_SSL)
         show_debug = settings.DEBUG
     elif 'javascript' in content_type.lower():
-        content = rewrite_script(content, proxy_domain, secure=secure)
+        content = rewrite_script(content, proxy_domain, secure=secure or IGNORE_SSL)
 
     if show_debug:
         ctx = {
@@ -83,7 +90,9 @@ def proxy_view(request, url, domain=None, secure=False, requests_args=None, temp
         }
         if int(response.status_code) in (301, 302):
             redirection = response.headers['location']
-            ctx['redirection'] = proxy_reverse(redirection, secure)
+            if proxy_domain in urljoin('http://%s' % proxy_domain, redirection):
+                redirection = proxy_reverse(redirection, secure)
+            ctx['redirection'] = redirection
         proxy_response = render(request, template_name, ctx)
     else:
         proxy_response = HttpResponse(
@@ -111,7 +120,7 @@ def proxy_view(request, url, domain=None, secure=False, requests_args=None, temp
         # should be.
         'content-length',
     ])
-    for key, value in response.headers.iteritems():
+    for key, value in response.headers.items():
         if key.lower() in excluded_headers:
             continue
         proxy_response[key] = value
@@ -129,7 +138,6 @@ def get_cookies(request, domain):
     return request.session.get(get_session_key(domain))
 
 def set_cookies(request, domain, cookies):
-    import cookielib
     try:
         jar = request.session[get_session_key(domain)]
     except KeyError:
@@ -151,7 +159,7 @@ def get_headers(environ):
     https://docs.djangoproject.com/en/dev/ref/request-response/#django.http.HttpRequest.META
     """
     headers = {}
-    for key, value in environ.iteritems():
+    for key, value in environ.items():
         # Sometimes, things don't like when you send the requesting host through.
         if key.startswith('HTTP_') and key != 'HTTP_HOST':
             headers[key[5:].replace('_', '-')] = value
